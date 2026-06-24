@@ -51,7 +51,7 @@ while IFS= read -r line; do
             fi
             subnet_ips[$subnet]+="$ip "
 
-            rule_num=$(echo "$line" | awk '{print $1}')
+            rule_num=$(echo "$line" | awk '{print $1}' | tr -d '[]')
             if [[ $rule_num =~ ^[0-9]+$ ]]; then
                 if [[ -z "${subnet_rules[$subnet]:-}" ]]; then
                     subnet_rules[$subnet]=""
