@@ -56,9 +56,9 @@ while IFS= read -r line; do
             fi
             subnet_ips[$subnet]+="$ip "
             
-            # Extract rule number from beginning of line
-            if [[ $line =~ ^[0-9]+ ]]; then
-                rule_num=$(echo "$line" | awk '{print $1}')
+            # Extract rule number from beginning of line (first non-whitespace token)
+            rule_num=$(echo "$line" | awk '{print $1}')
+            if [[ $rule_num =~ ^[0-9]+$ ]]; then
                 if [[ -z "${subnet_rules[$subnet]:-}" ]]; then
                     subnet_rules[$subnet]=""
                 fi
@@ -88,13 +88,15 @@ for subnet in "${!subnet_ips[@]}"; do
             log "Added rule: deny from $subnet.0/24"
             
             # Delete individual IPs (in reverse order)
-            rules_array=(${subnet_rules[$subnet]})
-            for ((i=${#rules_array[@]}-1; i>=0; i--)); do
-                rule_num=${rules_array[i]}
-                if sudo ufw delete "$rule_num" <<< "y" >/dev/null 2>&1; then
-                    log "Removed individual rule #$rule_num"
-                fi
-            done
+            if [[ -n "${subnet_rules[$subnet]:-}" ]]; then
+                rules_array=(${subnet_rules[$subnet]})
+                for ((i=${#rules_array[@]}-1; i>=0; i--)); do
+                    rule_num=${rules_array[i]}
+                    if sudo ufw delete "$rule_num" <<< "y" >/dev/null 2>&1; then
+                        log "Removed individual rule #$rule_num"
+                    fi
+                done
+            fi
         else
             log "Failed to add rule for $subnet.0/24"
         fi
