@@ -40,12 +40,14 @@ declare -A processed_subnets
 log "Starting UFW rule compaction"
 
 # Parse ufw rules
+# Format: "1    Anywhere                   DENY        192.168.1.1"
 while IFS= read -r line; do
     if [[ -z "$line" ]] || [[ "$line" =~ ^"Status:" ]] || [[ "$line" =~ ^"--" ]]; then
         continue
     fi
     
-    if [[ "$line" =~ "deny from" ]] && ! [[ "$line" =~ "/" ]]; then
+    # Look for DENY rules with individual IPs (not CIDR notation like /24)
+    if [[ "$line" =~ "DENY" ]] && ! [[ "$line" =~ "/" ]]; then
         if ip=$(extract_ip "$line"); then
             subnet=$(get_subnet "$ip")
             
@@ -54,8 +56,9 @@ while IFS= read -r line; do
             fi
             subnet_ips[$subnet]+="$ip "
             
+            # Extract rule number from beginning of line
             if [[ $line =~ ^[0-9]+ ]]; then
-                rule_num=$(echo "$line" | cut -d' ' -f1)
+                rule_num=$(echo "$line" | awk '{print $1}')
                 if [[ -z "${subnet_rules[$subnet]:-}" ]]; then
                     subnet_rules[$subnet]=""
                 fi
@@ -101,5 +104,5 @@ done
 log "Consolidation complete. Processed $consolidations subnets"
 
 # Output stats
-total_rules=$(sudo ufw status numbered 2>/dev/null | grep -c "deny from" || echo 0)
+total_rules=$(sudo ufw status numbered 2>/dev/null | grep -c "DENY" || echo 0)
 log "Current total rules: $total_rules"
