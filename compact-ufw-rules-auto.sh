@@ -45,21 +45,25 @@ done < <(sudo ufw status numbered 2>/dev/null | tail -n +4)
 
 # Phase 2: Identify subnets to consolidate
 subnets_to_consolidate=()
+subnets_to_cleanup=()
 for subnet in "${!subnet_ips[@]}"; do
     ip_count=$(echo "${subnet_ips[$subnet]}" | wc -w)
 
     if [[ $ip_count -ge $MIN_IPS_PER_SUBNET ]]; then
-        # Skip if /24 rule already exists
         if sudo ufw status | grep -q "$subnet\.0/24"; then
-            log "Subnet $subnet.0/24 already has a rule, skipping"
-            continue
+            # /24 rule exists but individual IPs still need cleaning up
+            subnets_to_cleanup+=("$subnet")
+            log "Subnet $subnet.0/24 already has a rule, will clean up $ip_count individual IPs"
+        else
+            subnets_to_consolidate+=("$subnet")
+            log "Will consolidate $ip_count IPs in $subnet.0/24"
         fi
-        subnets_to_consolidate+=("$subnet")
-        log "Will consolidate $ip_count IPs in $subnet.0/24"
     fi
 done
 
-if [[ ${#subnets_to_consolidate[@]} -eq 0 ]]; then
+all_subnets=("${subnets_to_consolidate[@]}" "${subnets_to_cleanup[@]}")
+
+if [[ ${#all_subnets[@]} -eq 0 ]]; then
     log "Nothing to consolidate"
     exit 0
 fi
@@ -73,7 +77,7 @@ while IFS= read -r line; do
     if [[ "$line" =~ "DENY" ]] && ! [[ "$line" =~ "/" ]]; then
         if ip=$(extract_ip "$line"); then
             subnet=$(get_subnet "$ip")
-            for target in "${subnets_to_consolidate[@]}"; do
+            for target in "${all_subnets[@]}"; do
                 if [[ "$subnet" == "$target" ]]; then
                     rule_num=$(echo "$line" | awk '{print $1}' | tr -d '[]')
                     if [[ $rule_num =~ ^[0-9]+$ ]]; then
@@ -100,14 +104,16 @@ for rule_num in "${sorted_rules[@]}"; do
     fi
 done
 
-# Phase 5: Add /24 rules
-for subnet in "${subnets_to_consolidate[@]}"; do
-    if sudo ufw insert 1 deny from "$subnet.0/24" >/dev/null 2>&1; then
-        log "Added rule: deny from $subnet.0/24"
-    else
-        log "Failed to add rule for $subnet.0/24"
-    fi
-done
+# Phase 5: Add /24 rules only for newly consolidated subnets
+if [[ ${#subnets_to_consolidate[@]} -gt 0 ]]; then
+    for subnet in "${subnets_to_consolidate[@]}"; do
+        if sudo ufw insert 1 deny from "$subnet.0/24" >/dev/null 2>&1; then
+            log "Added rule: deny from $subnet.0/24"
+        else
+            log "Failed to add rule for $subnet.0/24"
+        fi
+    done
+fi
 
 total_rules=$(sudo ufw status numbered 2>/dev/null | grep -c "DENY" || echo 0)
-log "Consolidation complete. Consolidated ${#subnets_to_consolidate[@]} subnets. Total rules now: $total_rules"
+log "Consolidation complete. New: ${#subnets_to_consolidate[@]}, cleaned up: ${#subnets_to_cleanup[@]}. Total rules now: $total_rules"
